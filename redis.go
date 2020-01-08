@@ -1,6 +1,8 @@
 package main
 
 import (
+	"crypto/sha1"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -14,7 +16,7 @@ const (
 	// global counter
 	URLIdKey = "next.url.id"
 	// mapping the shortlink to the url
-	ShortlinkKey = "short:%s:url"
+	ShortlinkKey = "shortlink:%s:url"
 	// mapping the hash of the url to the shortlink
 	URLHashKey = "urlhash:%s:url"
 	// mapping the shortlink to the detail of url
@@ -34,11 +36,11 @@ type ShortlinkDetail struct {
 }
 
 // create a redis client
-func NewRedisClient(addr string, password string, db int) *RedisClient {
+func NewRedisClient(rc *RedisConf) *RedisClient {
 	client := redis.NewClient(&redis.Options{
-		Addr:     addr,
-		Password: password,
-		DB:       db,
+		Addr:     rc.Addr,
+		Password: rc.Password,
+		DB:       rc.DB,
 	})
 
 	if _, err := client.Ping().Result(); err != nil {
@@ -130,7 +132,7 @@ func (r *RedisClient) ShortlinkInfo(eid string) (interface{}, error) {
 }
 
 // get url by shortlink
-func (r *RedisClient) UnShorten(eid string) (string, error) {
+func (r *RedisClient) Unshorten(eid string) (string, error) {
 	url, err := r.Client.Get(fmt.Sprintf(ShortlinkKey, eid)).Result()
 	if err == redis.Nil {
 		return "", StatusError{
@@ -145,5 +147,7 @@ func (r *RedisClient) UnShorten(eid string) (string, error) {
 }
 
 func toSha1(url string) string {
-
+	h := sha1.New()
+	h.Write([]byte(url))
+	return hex.EncodeToString(h.Sum(nil))
 }

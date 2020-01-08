@@ -14,14 +14,16 @@ import (
 type App struct {
 	Router      *mux.Router
 	Middlewares *Middleware
+	Config      *Conf
+	Storage
 }
 
-type shortenReq struct {
+type shortenRequest struct {
 	URL                 string `json:"url" validate:"nonzero"`
 	ExpirationInMinutes int64  `json:"expiration_in_minutes" validate:"min=0"`
 }
 
-type shortlinkReq struct {
+type shortlinkResponse struct {
 	Shortlink string `json:"shortlink"`
 }
 
@@ -36,6 +38,8 @@ func (a *App) Initialize() {
 	a.Router = mux.NewRouter()
 	a.Middlewares = &Middleware{}
 	a.InitializeRouter()
+	a.Config = InitConfig()
+	a.Storage = NewRedisClient(a.Config.Redis)
 }
 
 func (a *App) InitializeRouter() {
@@ -43,11 +47,11 @@ func (a *App) InitializeRouter() {
 
 	a.Router.Handle("/api/shorten", m.ThenFunc(a.CreaterShortlink)).Methods("POST")
 	a.Router.Handle("/api/info", m.ThenFunc(a.getShortlinkInfo)).Methods("GET")
-	a.Router.Handle("/{shortlink:[a-zA-Z0-9]{1-11}}", m.ThenFunc(a.redirect)).Methods("GET")
+	a.Router.Handle("/{shortlink:[0-9a-zA-Z]{1,11}}", m.ThenFunc(a.redirect)).Methods("GET")
 }
 
 func (a *App) CreaterShortlink(w http.ResponseWriter, r *http.Request) {
-	var req shortenReq
+	var req shortenRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		respondWithError(w, StatusError{
 			Code: http.StatusBadRequest,
@@ -64,20 +68,34 @@ func (a *App) CreaterShortlink(w http.ResponseWriter, r *http.Request) {
 	}
 	defer r.Body.Close()
 
-	fmt.Printf("%v\n", req)
-	panic("123")
+	s, err := a.Storage.Shorten(req.URL, req.ExpirationInMinutes)
+	if err != nil {
+		respondWithError(w, err)
+	} else {
+		respondWithJson(w, http.StatusCreated, shortlinkResponse{Shortlink: s})
+	}
 }
 
 func (a *App) getShortlinkInfo(w http.ResponseWriter, r *http.Request) {
 	vals := r.URL.Query()
 	s := vals.Get("shortlink")
 
-	fmt.Printf("%s\n", s)
+	d, err := a.Storage.ShortlinkInfo(s)
+	if err != nil {
+		respondWithError(w, err)
+	} else {
+		respondWithJson(w, http.StatusOK, d)
+	}
 }
 
 func (a *App) redirect(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
-	fmt.Printf("%s\n", vars["shortlink"])
+	u, err := a.Storage.Unshorten(vars["shortlink"])
+	if err != nil {
+		respondWithError(w, err)
+	} else {
+		http.Redirect(w, r, u, http.StatusTemporaryRedirect)
+	}
 }
 
 // Run starts listen and server
